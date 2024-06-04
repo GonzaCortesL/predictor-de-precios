@@ -1,3 +1,5 @@
+from signal import signal, SIGPIPE, SIG_DFL
+signal(SIGPIPE,SIG_DFL)
 import streamlit as st
 import yfinance as yf
 import numpy as np
