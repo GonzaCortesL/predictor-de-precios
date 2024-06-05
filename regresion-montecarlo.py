@@ -5,25 +5,70 @@ import pandas as pd
 import statsmodels.api as sm
 from scipy.stats import norm, shapiro
 import matplotlib.pyplot as plt
-import requests
-from time import sleep
 
 # Function to fetch historical stock data from Yahoo Finance
-def get_stock_data(symbol, start_date, end_date, retries=3):
-    for _ in range(retries):
-        try:
-            stock_data = yf.download(symbol, start=start_date, end=end_date)['Close']
-            return stock_data
-        except (requests.ConnectionError, requests.Timeout, requests.RequestException) as e:
-            st.error(f"Network error fetching data for {symbol}: {e}. Retrying...")
-            sleep(1)  # Wait for 1 second before retrying
-        except Exception as e:
-            st.error(f"Error fetching data for {symbol}: {e}")
-            return None
-    st.error(f"Failed to fetch data for {symbol} after {retries} retries.")
-    return None
+def get_stock_data(symbol, start_date, end_date):
+    try:
+        stock_data = yf.download(symbol, start=start_date, end=end_date)['Close']
+        return stock_data
+    except Exception as e:
+        st.error(f"Error fetching data for {symbol}: {e}")
+        return None
 
-# Rest of the code remains unchanged...
+# Function to perform OLS regression and predict stock prices
+def perform_ols_regression(stock_data_x, stock_data_y):
+    X = sm.add_constant(stock_data_x)  # Adds a constant term to the predictor
+    model = sm.OLS(stock_data_y, X).fit()
+    y_pred = model.predict(X)
+    return model, y_pred
+
+# Function to evaluate regression results
+def evaluate_regression(stock_data_y, y_pred, significance_level):
+    residuals = stock_data_y - y_pred
+    mean_residuals = np.mean(residuals)
+    std_residuals = np.std(residuals)
+    shapiro_stat, shapiro_pvalue = shapiro(residuals)
+    normality = 'Normal' if shapiro_pvalue > 0.05 else 'Not Normal'
+    
+    return residuals, mean_residuals, std_residuals, shapiro_stat, shapiro_pvalue, normality
+
+# Function to plot results
+def plot_results(predictors_df, stock_data_y, y_pred, residuals, mean_residuals, std_residuals):
+    st.write('### Actual vs Predicted price:')
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.scatter(predictors_df.index, stock_data_y, label='Actual')
+    ax.plot(predictors_df.index, y_pred, color='red', linewidth=2, label='Predicted')
+    ax.set_title('OLS Regression - Stock Price Prediction')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Stock Price')
+    ax.legend()
+    st.pyplot(fig)
+    
+    st.write('### Normal Distribution of Residuals:')
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.hist(residuals, bins=20, density=True, alpha=0.6, color='g')
+    xmin, xmax = plt.xlim()
+    x = np.linspace(xmin, xmax, 100)
+    p = norm.pdf(x, mean_residuals, std_residuals)
+    ax.plot(x, p, 'k', linewidth=2)
+    ax.set_title('Normal Distribution of Residuals')
+    ax.set_xlabel('Residuals')
+    ax.set_ylabel('Probability Density')
+    st.pyplot(fig)
+
+# Function to perform Monte Carlo simulation for forecasting
+def monte_carlo_forecast(stock_data_y, model, predictors_df, num_simulations):
+    X = sm.add_constant(predictors_df)  # Adds a constant term to the predictors
+    predictions = []
+    residuals = stock_data_y - model.predict(X)
+    for _ in range(num_simulations):
+        # Generate random normal errors based on residuals
+        errors = np.random.normal(np.mean(residuals), np.std(residuals), len(stock_data_y))
+        simulated_y = model.predict(X) + errors
+        predictions.append(simulated_y[-1])
+    
+    expected_value = np.mean(predictions)
+    return expected_value
 
 # Welcome window
 def welcome_window():
@@ -122,7 +167,16 @@ else:
                     
                     # Evaluate regression results again
                     residuals, mean_residuals, std_residuals, shapiro_stat, shapiro_pvalue, normality = evaluate_regression(stock_data_y, y_pred, significance_level)
-
+                    
+                    # Get model summary and statistics again
+                    model_summary = model.summary()
+                    r_value = model.rsquared
+                    p_values = model.pvalues[1:]  # p-values for the predictors
+                    
+                    # Determine significance and correlation again
+                    significance = ['Significant' if p < significance_level else 'Not Significant' for p in p_values]
+                    correlation = 'Strong correlation' if r_value > desired_correlation else 'Not enough correlation'
+                
                 # Perform Monte Carlo Forecasting
                 num_simulations = 1000
                 expected_value_mc = monte_carlo_forecast(stock_data_y, model, predictors_df, num_simulations)
@@ -165,4 +219,3 @@ else:
     if st.button('Go Back to Welcome'):
         st.session_state.welcome_done = False
         st.experimental_rerun()
-
